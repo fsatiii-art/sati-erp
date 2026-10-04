@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: sati-erp
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --workers 1 --threads 4 --timeout 120 --bind 0.0.0.0:$PORT wsgi:app
+    healthCheckPath: /healthz
+    envVars:
+      - key: SATI_SECRET
+        generateValue: true
+      - key: SATI_DB_PATH
+        value: /var/data/sati_v106.db
+      - key: SATI_COOKIE_SECURE
+        value: "1"
+    disk:
+      name: sati-erp-data
+      mountPath: /var/data
+      sizeGB: 1
