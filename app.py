@@ -10299,7 +10299,7 @@ def inventory_master_v93():
                     sn=request.form.get("serial","").strip()
                     if not sn:raise ValueError("Serial Number مطلوب")
                     serialid=c.execute("INSERT INTO inventory_serials_v93(item_code,serial_no,warehouse_id,bin_id) VALUES(?,?,?,?)",(item,sn,wh,binid)).lastrowid
-                ref="RCV-"+datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+                ref="RCV-"+datetime.now().strftime("%Y%m%d%H%M%S")
                 c.execute("INSERT INTO stock_ledger_v93(item_code,txn_date,txn_type,warehouse_id,bin_id,lot_id,serial_id,qty_in,unit_cost,source_type,reference,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(item,date,"RECEIPT",wh,binid,lotid,serialid,qty,cost,"MANUAL_RECEIPT",ref,session.get("user","")))
                 c.execute("INSERT INTO inventory_cost_layers_v93(item_code,warehouse_id,receipt_date,source_type,qty_received,qty_remaining,unit_cost) VALUES(?,?,?,?,?,?,?)",(item,wh,date,"RECEIPT",qty,qty,cost))
             c.commit();flash("تم الحفظ")
