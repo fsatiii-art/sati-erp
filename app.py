@@ -10284,39 +10284,52 @@ def inventory_master_v93():
                 VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(item_code) DO UPDATE SET item_name=excluded.item_name,tracking_type=excluded.tracking_type,
                 valuation_method=excluded.valuation_method,min_qty=excluded.min_qty,max_qty=excluded.max_qty,reorder_qty=excluded.reorder_qty,lead_time_days=excluded.lead_time_days""",
                 (request.form["item_code"],request.form["item_name"],request.form["tracking"],request.form["valuation"],float(request.form.get("min") or 0),float(request.form.get("max") or 0),float(request.form.get("reorder") or 0),int(request.form.get("lead") or 0)))
-            elif a=="receipt":
-                              item = request.form.get("item_code", "").strip()
-                                wh = int(request.form.get("warehouse") or 0)
-                                binid = int(request.form.get("bin") or 0)
-                                qty = float(request.form.get("qty") or 0); cost = float(request.form["cost"]); date = request.form["date"]
-                            if not item:
-                                raise ValueError("اختر الصنف")
-                            if wh <= 0:
-                                raise ValueError("اختر المستودع")
-                            if binid <= 0:
-                                raise ValueError("اختر Bin")
-                            if qty <= 0:
-                                raise ValueError("أدخل كمية أكبر من صفر")
-                            
-                            it=c.execute("SELECT * FROM inventory_items_v93 WHERE item_code=?",(item,)).fetchone()
-                            if not it:
-                                raise ValueError("الصنف غير موجود")
-                             lotid=serialid=None
-                                if it["tracking_type"]=="LOT":
-                                    lot=request.form.get("lot","").strip()
-                                    if not lot:raise ValueError("رقم Lot مطلوب")
-                                    c.execute("INSERT OR IGNORE INTO inventory_lots_v93(item_code,lot_no,manufacture_date,expiry_date) VALUES(?,?,?,?)",(item,lot,request.form.get("mfg") or None,request.form.get("expiry") or None))
-                                    lotid=c.execute("SELECT id FROM inventory_lots_v93 WHERE item_code=? AND lot_no=?",(item,lot)).fetchone()["id"]
-                                if it["tracking_type"]=="SERIAL":
-                                    if qty!=1:raise ValueError("الصنف Serial يستلم بوحدة واحدة لكل رقم تسلسلي")
-                                    sn=request.form.get("serial","").strip()
-                                    if not sn:raise ValueError("Serial Number مطلوب")
-                                    serialid=c.execute("INSERT INTO inventory_serials_v93(item_code,serial_no,warehouse_id,bin_id) VALUES(?,?,?,?)",(item,sn,wh,binid)).lastrowid
-                            ref="RCV-"+datetime.now().strftime("%Y%m%d%H%M%S")
-                            c.execute("INSERT INTO stock_ledger_v93(item_code,txn_date,txn_type,warehouse_id,bin_id,lot_id,serial_id,qty_in,unit_cost,source_type,reference,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(item,date,"RECEIPT",wh,binid,lotid,serialid,qty,cost,"MANUAL_RECEIPT",ref,session.get("user","")))
-                            c.execute("INSERT INTO inventory_cost_layers_v93(item_code,warehouse_id,receipt_date,source_type,qty_received,qty_remaining,unit_cost) VALUES(?,?,?,?,?,?,?)",(item,wh,date,"RECEIPT",qty,qty,cost))
-                        c.commit();flash("تم الحفظ")
-    except Exception as e:c.rollback();flash(str(e))
+           elif a=="receipt":
+    item = request.form.get("item_code", "").strip()
+    wh = int(request.form.get("warehouse") or 0)
+    binid = int(request.form.get("bin") or 0)
+    qty = float(request.form.get("qty") or 0); cost = float(request.form["cost"]); date = request.form["date"]
+
+    if not item:
+        raise ValueError("اختر الصنف")
+    if wh <= 0:
+        raise ValueError("اختر المستودع")
+    if binid <= 0:
+        raise ValueError("اختر Bin")
+    if qty <= 0:
+        raise ValueError("أدخل كمية أكبر من صفر")
+
+    it = c.execute(
+        "SELECT * FROM inventory_items_v93 WHERE item_code=?",
+        (item,)
+    ).fetchone()
+
+    if not it:
+        raise ValueError("الصنف غير موجود")
+
+   lotid = serialid = None
+
+if it["tracking_type"] == "LOT":
+    lot = request.form.get("lot", "").strip()
+    if not lot:
+        raise ValueError("مطلوب رقم Lot")
+    c.execute(...)
+    lotid = c.execute(...).fetchone()["id"]
+
+if it["tracking_type"] == "SERIAL":
+    if qty != 1:
+        raise ValueError("يستلم بوحدة واحدة لكل رقم تسلسلي Serial للصنف")
+    sn = request.form.get("serial", "").strip()
+    if not sn:
+        raise ValueError("مطلوب Serial Number")
+    serialid = c.execute(...).lastrowid
+
+ref = "RCV-" + datetime.now().strftime("%Y%m%d%H%M%S")
+c.execute(...)
+c.execute(...)
+c.commit()
+flash("تم الحفظ")
+except Exception as e:c.rollback();flash(str(e))
     c.close();return redirect("/inventory-master-v93")
     whs=c.execute("SELECT * FROM warehouses_v93 WHERE active=1 ORDER BY name").fetchall();bins=c.execute("SELECT b.*,w.code wh FROM warehouse_bins_v93 b JOIN warehouses_v93 w ON w.id=b.warehouse_id WHERE b.active=1").fetchall();items=c.execute("SELECT * FROM inventory_items_v93 WHERE active=1 ORDER BY item_code").fetchall();c.close()
     wo="".join(f"<option value='{x['id']}'>{x['code']} — {html.escape(x['name'])}</option>" for x in whs);bo="".join(f"<option value='{x['id']}'>{x['wh']} / {x['code']}</option>" for x in bins);io="".join(f"<option value='{x['item_code']}'>{x['item_code']} — {html.escape(x['item_name'])}</option>" for x in items)
