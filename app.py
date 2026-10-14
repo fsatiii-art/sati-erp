@@ -2605,12 +2605,38 @@ def reports():
 @app.route("/invoice-print/<int:iid>")
 def invoice_print(iid):
     if not session.get("uid"): return redirect("/login")
-    c=con(); i=c.execute("SELECT i.*,p.name partner,w.name warehouse FROM invoices i JOIN partners p ON p.id=i.partner_id JOIN warehouses w ON w.id=i.warehouse_id WHERE i.id=?",(iid,)).fetchone()
-    ls=c.execute("SELECT l.*,p.code,p.name FROM invoice_lines l JOIN products p ON p.id=l.product_id WHERE l.invoice_id=?",(iid,)).fetchall(); c.close()
-    if not i:return ("غير موجود",404)
-    rows="".join(f"<tr><td>{x['code']}</td><td>{x['name']}</td><td>{x['qty']}</td><td>{x['price']:.2f}</td><td>{x['vat']:.2f}</td><td>{x['total']:.2f}</td></tr>" for x in ls)
-    return f"""<!doctype html><html lang=ar dir=rtl><meta charset=utf-8><title>{i['no']}</title><style>body{{font-family:Arial;padding:30px}}table{{width:100%;border-collapse:collapse}}th,td{{border:1px solid #ccc;padding:9px}}.head{{display:flex;justify-content:space-between}}@media print{{button{{display:none}}}}</style><button onclick=print()>طباعة</button><div class=head><h1>ساتي ERP</h1><h2>{'فاتورة بيع' if i['type']=='SALE' else 'فاتورة شراء'}</h2></div><p>رقم: {i['no']}<br>التاريخ: {i['date']}<br>الطرف: {i['partner']}<br>المستودع: {i['warehouse']}</p><table><tr><th>الكود</th><th>الصنف</th><th>الكمية</th><th>السعر</th><th>VAT</th><th>الإجمالي</th></tr>{rows}</table><h3>قبل الضريبة: {i['subtotal']:.2f}</h3><h3>الضريبة: {i['vat']:.2f}</h3><h2>الإجمالي: {i['total']:.2f}</h2></html>"""
-
+    from markupsafe import escape
+    import base64
+    c=con()
+    i=c.execute("SELECT i.*,p.name partner,w.name warehouse FROM invoices i JOIN partners p ON p.id=i.partner_id JOIN warehouses w ON w.id=i.warehouse_id WHERE i.id=?",(iid,)).fetchone()
+    if not i:
+        c.close();return ("الفاتورة غير موجودة",404)
+    ls=c.execute("SELECT l.*,p.code,p.name FROM invoice_lines l JOIN products p ON p.id=l.product_id WHERE l.invoice_id=?",(iid,)).fetchall()
+    co=c.execute("SELECT * FROM company WHERE id=1").fetchone()
+    c.close()
+    company_name=str((co['name'] if co else None) or 'ساتي التقنية')
+    company_en=str((co['name_en'] if co else None) or 'Sati Technology')
+    vat_no=str((co['tax_no'] if co else None) or '')
+    invoice_date=str(i['date'] or '')
+    # ZATCA QR TLV fields 1-5; only emit when tax number is configured and valid.
+    qr_html="<div class='qr-empty'>يظهر رمز QR بعد إدخال الرقم الضريبي الصحيح في بيانات المنشأة</div>"
+    if vat_no.isdigit() and len(vat_no)==15 and i['type']=='SALE':
+        try:
+            import qrcode
+            from datetime import datetime as dt
+            timestamp=dt.fromisoformat(invoice_date.replace('Z','+00:00')).isoformat()
+            fields=[company_name,vat_no,timestamp,f"{float(i['total']):.2f}",f"{float(i['vat']):.2f}"]
+            payload=b''.join(bytes([idx,len(value.encode('utf-8'))])+value.encode('utf-8') for idx,value in enumerate(fields,1))
+            qr=qrcode.make(base64.b64encode(payload).decode('ascii'))
+            out=BytesIO();qr.save(out,format='PNG')
+            qr_html=f"<img class='qr' alt='رمز QR للفاتورة' src='data:image/png;base64,{base64.b64encode(out.getvalue()).decode()}'><small>امسح للتحقق من بيانات الفاتورة</small>"
+        except (ImportError,ValueError,OverflowError):
+            qr_html="<div class='qr-empty'>تعذر توليد QR. تحقق من مكتبة qrcode وبيانات الفاتورة.</div>"
+    rows=''.join(f"<tr><td>{escape(x['code'])}</td><td>{escape(x['name'])}</td><td>{x['qty']:g}</td><td>{x['price']:.2f}</td><td>{x['vat']:.2f}</td><td>{x['total']:.2f}</td></tr>" for x in ls)
+    kind='فاتورة ضريبية' if i['type']=='SALE' else 'فاتورة مشتريات'
+    return f"""<!doctype html><html lang='ar' dir='rtl'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>{escape(i['no'])}</title><style>
+    *{{box-sizing:border-box}}body{{margin:0;background:#eef2f7;font-family:Tahoma,Arial,sans-serif;color:#172b4d}}.sheet{{max-width:850px;min-height:1100px;margin:24px auto;background:white;padding:42px;box-shadow:0 8px 30px #172b4d20}}.brand{{display:flex;justify-content:space-between;align-items:center;border-bottom:4px solid #087e96;padding-bottom:22px}}h1{{font-size:27px;margin:0;color:#10365b}}.en{{font-size:14px;color:#087e96;letter-spacing:1px;margin-top:5px}}.kind{{font-size:23px;font-weight:bold;color:#10365b}}.sub{{color:#60758a;font-size:12px}}.info{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:24px 0}}.panel{{background:#f4f8fb;border:1px solid #dce7ee;border-radius:10px;padding:16px;line-height:2}}.qr-section{{display:flex;justify-content:space-between;align-items:center;gap:20px;margin:20px 0 24px;padding:16px;border:1px solid #dce7ee;border-radius:10px}}.qr{{width:125px;height:125px;display:block}}.qr-section small{{display:block;color:#60758a}}.qr-empty{{font-size:12px;color:#8a5c00;max-width:220px}}table{{width:100%;border-collapse:collapse;text-align:right}}th{{background:#10365b;color:white}}th,td{{padding:12px 10px;border-bottom:1px solid #dce7ee;font-size:13px}}.totals{{width:320px;max-width:100%;margin:25px 0 25px auto}}.totals div{{display:flex;justify-content:space-between;padding:10px;border-bottom:1px solid #dce7ee}}.totals .grand{{background:#e4f5f8;color:#10365b;font-size:18px;font-weight:bold;border-radius:8px}}footer{{margin-top:60px;border-top:1px solid #dce7ee;padding-top:15px;text-align:center;color:#60758a;font-size:12px}}.actions{{text-align:center;padding:14px}}button{{background:#087e96;color:white;border:0;border-radius:7px;padding:12px 24px;cursor:pointer}}@page{{size:A4;margin:12mm}}@media print{{body{{background:white}}.sheet{{margin:0;padding:8px;box-shadow:none;min-height:auto;max-width:none}}.actions{{display:none}}}}
+    </style></head><body><div class='actions'><button onclick='window.print()'>طباعة / حفظ PDF</button></div><article class='sheet'><header class='brand'><div><h1>{escape(company_name)}</h1><div class='en'>{escape(company_en)}</div><div class='sub'>{escape((co['address'] if co else '') or '')}</div><div class='sub'>{escape((co['phone'] if co else '') or '')} | {escape((co['email'] if co else '') or '')}</div></div><div><div class='kind'>{kind}</div><div class='sub'>TAX INVOICE</div></div></header><section class='info'><div class='panel'><b>بيانات الفاتورة</b><div>الرقم: {escape(i['no'])}</div><div>التاريخ: {escape(invoice_date)}</div><div>المستودع: {escape(i['warehouse'])}</div></div><div class='panel'><b>بيانات العميل / المورد</b><div>{escape(i['partner'])}</div><div>الرقم الضريبي للمنشأة: {escape(vat_no or 'غير مسجل')}</div><div>السجل التجاري: {escape((co['cr_no'] if co else '') or '-')}</div></div></section><section class='qr-section'><div><b>رمز الاستجابة السريعة QR</b><div class='sub'>بيانات الفاتورة الضريبية</div></div><div>{qr_html}</div></section><table><thead><tr><th>الكود</th><th>الصنف / الخدمة</th><th>الكمية</th><th>السعر (ر.س)</th><th>الضريبة</th><th>الإجمالي</th></tr></thead><tbody>{rows}</tbody></table><section class='totals'><div><span>قبل الضريبة</span><b>{i['subtotal']:.2f} ر.س</b></div><div><span>ضريبة القيمة المضافة</span><b>{i['vat']:.2f} ر.س</b></div><div class='grand'><span>الإجمالي المستحق</span><span>{i['total']:.2f} ر.س</span></div></section><footer>ساتي التقنية | شكرًا لتعاملكم معنا</footer></article></body></html>"""
 
 @app.route("/products",methods=["GET","POST"])
 def products():
@@ -10284,53 +10310,34 @@ def inventory_master_v93():
                 VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(item_code) DO UPDATE SET item_name=excluded.item_name,tracking_type=excluded.tracking_type,
                 valuation_method=excluded.valuation_method,min_qty=excluded.min_qty,max_qty=excluded.max_qty,reorder_qty=excluded.reorder_qty,lead_time_days=excluded.lead_time_days""",
                 (request.form["item_code"],request.form["item_name"],request.form["tracking"],request.form["valuation"],float(request.form.get("min") or 0),float(request.form.get("max") or 0),float(request.form.get("reorder") or 0),int(request.form.get("lead") or 0)))
-           elif a=="receipt":
-    item = request.form.get("item_code", "").strip()
-    wh = int(request.form.get("warehouse") or 0)
-    binid = int(request.form.get("bin") or 0)
-    qty = float(request.form.get("qty") or 0); cost = float(request.form["cost"]); date = request.form["date"]
-
-    if not item:
-        raise ValueError("اختر الصنف")
-    if wh <= 0:
-        raise ValueError("اختر المستودع")
-    if binid <= 0:
-        raise ValueError("اختر Bin")
-    if qty <= 0:
-        raise ValueError("أدخل كمية أكبر من صفر")
-
-    it = c.execute(
-        "SELECT * FROM inventory_items_v93 WHERE item_code=?",
-        (item,)
-    ).fetchone()
-
-    if not it:
-        raise ValueError("الصنف غير موجود")
-
-   lotid = serialid = None
-
-if it["tracking_type"] == "LOT":
-    lot = request.form.get("lot", "").strip()
-    if not lot:
-        raise ValueError("مطلوب رقم Lot")
-    c.execute(...)
-    lotid = c.execute(...).fetchone()["id"]
-
-if it["tracking_type"] == "SERIAL":
-    if qty != 1:
-        raise ValueError("يستلم بوحدة واحدة لكل رقم تسلسلي Serial للصنف")
-    sn = request.form.get("serial", "").strip()
-    if not sn:
-        raise ValueError("مطلوب Serial Number")
-    serialid = c.execute(...).lastrowid
-
-ref = "RCV-" + datetime.now().strftime("%Y%m%d%H%M%S")
-c.execute(...)
-c.execute(...)
-c.commit()
-flash("تم الحفظ")
-except Exception as e:c.rollback();flash(str(e))
-    c.close();return redirect("/inventory-master-v93")
+            elif a=="receipt":
+                item=request.form.get("item_code","").strip()
+                wh=int(request.form.get("warehouse") or 0)
+                binid=int(request.form.get("bin") or 0)
+                qty=float(request.form.get("qty") or 0)
+                cost=float(request.form.get("cost") or 0)
+                date=request.form.get("date") or datetime.now().strftime("%Y-%m-%d")
+                it=c.execute("SELECT * FROM inventory_items_v93 WHERE item_code=?",(item,)).fetchone()
+                if not it or wh<=0 or binid<=0 or qty<=0 or cost<0:
+                    raise ValueError("تحقق من الصنف والمستودع والموقع والكمية والتكلفة")
+                if not c.execute("SELECT 1 FROM warehouse_bins_v93 WHERE id=? AND warehouse_id=? AND active=1",(binid,wh)).fetchone():
+                    raise ValueError("الموقع لا يتبع المستودع المحدد")
+                lotid=serialid=None
+                if it["tracking_type"]=="LOT":
+                    lot=request.form.get("lot","").strip()
+                    if not lot: raise ValueError("رقم الدفعة مطلوب")
+                    c.execute("INSERT OR IGNORE INTO inventory_lots_v93(item_code,lot_no,manufacture_date,expiry_date) VALUES(?,?,?,?)",(item,lot,request.form.get("mfg"),request.form.get("expiry")))
+                    lotid=c.execute("SELECT id FROM inventory_lots_v93 WHERE item_code=? AND lot_no=?",(item,lot)).fetchone()["id"]
+                elif it["tracking_type"]=="SERIAL":
+                    serial=request.form.get("serial","").strip()
+                    if qty!=1 or not serial: raise ValueError("أدخل رقمًا تسلسليًا واحدًا وكمية 1")
+                    serialid=c.execute("INSERT INTO inventory_serials_v93(item_code,serial_no,warehouse_id,bin_id) VALUES(?,?,?,?)",(item,serial,wh,binid)).lastrowid
+                ref=number("RCV")
+                c.execute("INSERT INTO stock_ledger_v93(item_code,txn_date,txn_type,warehouse_id,bin_id,lot_id,serial_id,qty_in,unit_cost,source_type,reference,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",(item,date,"RECEIPT",wh,binid,lotid,serialid,qty,cost,"MANUAL_RECEIPT",ref,session.get("user","")))
+            c.commit();flash("تم الحفظ بنجاح")
+        except Exception as e:
+            c.rollback();flash(str(e))
+        c.close();return redirect("/inventory-master-v93")
     whs=c.execute("SELECT * FROM warehouses_v93 WHERE active=1 ORDER BY name").fetchall();bins=c.execute("SELECT b.*,w.code wh FROM warehouse_bins_v93 b JOIN warehouses_v93 w ON w.id=b.warehouse_id WHERE b.active=1").fetchall();items=c.execute("SELECT * FROM inventory_items_v93 WHERE active=1 ORDER BY item_code").fetchall();c.close()
     wo="".join(f"<option value='{x['id']}'>{x['code']} — {html.escape(x['name'])}</option>" for x in whs);bo="".join(f"<option value='{x['id']}'>{x['wh']} / {x['code']}</option>" for x in bins);io="".join(f"<option value='{x['item_code']}'>{x['item_code']} — {html.escape(x['item_name'])}</option>" for x in items)
     rr="".join(f"<tr><td>{x['item_code']}</td><td>{html.escape(x['item_name'])}</td><td>{x['tracking_type']}</td><td>{x['valuation_method']}</td><td>{x['min_qty']}</td><td>{x['max_qty']}</td><td>{x['reorder_qty']}</td></tr>" for x in items)
